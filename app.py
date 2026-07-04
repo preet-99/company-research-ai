@@ -199,11 +199,20 @@ if user_input:
 
                 st.markdown("### Competitors")
                 for comp in ai_result.get("competitors", []):
+                    # Guard against malformed AI output (e.g. plain strings
+                    # instead of {"name":..., "website":...} dicts)
+                    if isinstance(comp, dict):
+                        comp_name = comp.get("name", "Unknown")
+                        comp_site = comp.get("website", "N/A")
+                    else:
+                        comp_name = str(comp)
+                        comp_site = "N/A"
+
                     st.markdown(
                         f"""
                     <div class='result-box' style='padding:10px 16px;margin:6px 0'>
-                    <b>{comp.get('name')}</b><br>
-                    <a href='{comp.get('website')}' target='_blank'>{comp.get('website')}</a>
+                    <b>{comp_name}</b><br>
+                    <a href='{comp_site}' target='_blank'>{comp_site}</a>
                     </div>
                     """,
                         unsafe_allow_html=True,

@@ -1,7 +1,91 @@
 import requests
 import json
+import re
 import time
 import streamlit as st
+
+
+def _extract_json_block(text):
+    """Pull out the JSON object from model output, stripping markdown fences etc."""
+    text = text.strip()
+    if "```json" in text:
+        text = text.split("```json", 1)[1].split("```", 1)[0]
+    elif "```" in text:
+        text = text.split("```", 1)[1].split("```", 1)[0]
+
+    # If there's extra chatter before/after, grab the outermost { ... }
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        text = text[start:end + 1]
+
+    return text.strip()
+
+
+def _repair_json(text):
+    """
+    Try to fix common malformed-JSON patterns some small/free models produce, e.g.:
+      {t:name:"PayPal",w:"https://paypal.com"}   -> {"name":"PayPal","website":"https://paypal.com"}
+    This is best-effort, not a full JSON5 parser.
+    """
+    fixed = text
+
+    # Fix known shorthand keys sometimes emitted by small models
+    fixed = re.sub(r'\bt:name\b', '"name"', fixed)
+    fixed = re.sub(r'\bw:(?=")', '"website":', fixed)
+
+    # Quote any remaining bare keys like  key:  ->  "key":
+    fixed = re.sub(r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:', r'\1"\2":', fixed)
+
+    # Remove trailing commas before } or ]
+    fixed = re.sub(r',\s*([}\]])', r'\1', fixed)
+
+    return fixed
+
+
+def _normalize_competitors(raw_list):
+    """
+    Guarantee every competitor is a dict with 'name' and 'website' string keys,
+    no matter what shape the model actually returned (string, missing keys, etc).
+    """
+    normalized = []
+    if not isinstance(raw_list, list):
+        return normalized
+
+    for item in raw_list:
+        if isinstance(item, dict):
+            name = item.get("name") or item.get("t") or "Unknown"
+            website = item.get("website") or item.get("w") or "N/A"
+            normalized.append({"name": str(name), "website": str(website)})
+        elif isinstance(item, str):
+            # Model just gave a plain string (e.g. "PayPal" or "PayPal - https://paypal.com")
+            normalized.append({"name": item, "website": "N/A"})
+        # Anything else (int, None, etc.) is skipped
+
+    return normalized
+
+
+def _parse_ai_json(raw_content):
+    """
+    Try hard to turn a model's raw text into the expected dict.
+    Returns the parsed dict, or None if it truly can't be salvaged.
+    """
+    if not raw_content:
+        return None
+
+    candidate = _extract_json_block(raw_content)
+
+    # Attempt 1: parse as-is
+    try:
+        return json.loads(candidate)
+    except Exception:
+        pass
+
+    # Attempt 2: try to repair common issues and parse again
+    try:
+        return json.loads(_repair_json(candidate))
+    except Exception:
+        return None
 
 
 def analyze_company(
@@ -44,6 +128,8 @@ Website Content: {scraped_data}
     }}
 
     STRICT RULES:
+    - Output MUST be valid, parseable JSON. Use double quotes around every key and string value.
+    - Do not abbreviate keys (use "name" and "website", not "t" or "w").
     - Summary: exactly 3 sentences, clear and professional
     - Products: maximum 6 items, short names only
     - Pain Points: exactly 4 points, one sentence each
@@ -51,11 +137,13 @@ Website Content: {scraped_data}
     - NO extra explanation, NO markdown, ONLY valid JSON
     """
 
-    # Selected model
+    # Selected model first, then reliable fallbacks
     models = [selected_model]
     fallbacks = [
         "openrouter/free",
         "meta-llama/llama-3.3-70b:free",
+        "mistralai/mistral-7b-instruct:free",
+        "deepseek/deepseek-chat:free",
         "google/gemma-3-4b-it:free",
         "poolside/laguna-xs-2.1:free",
     ]
@@ -68,7 +156,8 @@ Website Content: {scraped_data}
         "Content-Type": "application/json",
     }
 
-    content = None
+    last_raw_content = None
+    parsed = None
 
     for model in models:
         try:
@@ -84,41 +173,60 @@ Website Content: {scraped_data}
                         "reasoning": {"enabled": True},
                     }
                 ),
+                timeout=60,
             )
 
             result = response.json()
 
-            if "choices" in result:
-                print(f"Done : {model}")
-                content = result["choices"][0]["message"]["content"]
+            if "choices" not in result:
+                print(f"Failed: {result.get('error', {}).get('message', '')}")
+                time.sleep(3)
+                continue
+
+            content = result["choices"][0]["message"]["content"]
+            last_raw_content = content
+
+            parsed = _parse_ai_json(content)
+
+            if parsed is not None:
+                print(f"Done (valid JSON): {model}")
                 break
             else:
-                print(f"Failed: {result.get('error', {}).get('message', '')}")
-                time.sleep(5)
+                # This model responded but gave unparseable JSON — try the next one
+                print(f"Model {model} returned malformed JSON, trying next fallback...")
+                time.sleep(2)
+                continue
 
         except Exception as e:
             print(f"Error: {e}")
-            time.sleep(5)
+            time.sleep(3)
+            continue
 
-    if not content:
+    if parsed is not None:
+        # Make sure all expected keys exist and are the right type, even if the
+        # model omitted a field or returned something malformed (e.g. strings
+        # instead of dicts inside "competitors").
+        products = parsed.get("products", []) or []
+        pain_points = parsed.get("pain_points", []) or []
+
+        if not isinstance(products, list):
+            products = [str(products)]
+        if not isinstance(pain_points, list):
+            pain_points = [str(pain_points)]
+
         return {
-            "summary": "AI analysis failed",
-            "products": [],
-            "pain_points": [],
-            "competitors": [],
+            "summary": str(parsed.get("summary", "N/A")),
+            "products": [str(p) for p in products],
+            "pain_points": [str(p) for p in pain_points],
+            "competitors": _normalize_competitors(parsed.get("competitors", [])),
         }
 
-    try:
-        content = content.strip()
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0]
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0]
-        return json.loads(content)
-    except:
-        return {
-            "summary": content,
-            "products": [],
-            "pain_points": [],
-            "competitors": [],
-        }
+    # Every model failed to return usable JSON
+    return {
+        "summary": "AI analysis failed: no model returned valid JSON. "
+                    "Please try again or select a different model.",
+        "products": [],
+        "pain_points": [],
+        "competitors": [],
+        "_raw_debug": last_raw_content,  # helpful while debugging; safe to ignore in UI
+    }
