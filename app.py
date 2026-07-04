@@ -105,7 +105,7 @@ st.markdown(
 )
 
 # Header
-st.markdown("## 🔍 AI Company Research Assistant")
+st.markdown("##  AI Company Research Assistant")
 st.markdown(
     "Enter a company name or website URL to generate a full AI-powered research report."
 )
@@ -143,7 +143,7 @@ def render_report(company_name, search_data, ai_result, pdf_bytes, pdf_filename)
         st.markdown(
             f"""
         <div class='result-card'>
-        <h4>🏢 Company Info</h4>
+        <h4> Company Info</h4>
         <b>Website:</b> {search_data.get('website', 'N/A')}<br>
         <b>Phone:</b> {search_data.get('phone', 'N/A')}<br>
         <b>Address:</b> {search_data.get('address', 'N/A')}<br><br>
@@ -158,7 +158,7 @@ def render_report(company_name, search_data, ai_result, pdf_bytes, pdf_filename)
         st.markdown(
             f"""
         <div class='result-card'>
-        <h4>📦 Products / Services</h4>
+        <h4>Products / Services</h4>
         <ul>{product_html}</ul>
         </div>
         """,
@@ -172,7 +172,7 @@ def render_report(company_name, search_data, ai_result, pdf_bytes, pdf_filename)
         st.markdown(
             f"""
         <div class='result-card'>
-        <h4>⚠️ AI Pain Points</h4>
+        <h4>AI Pain Points</h4>
         <ul>{pain_html}</ul>
         </div>
         """,
@@ -188,7 +188,7 @@ def render_report(company_name, search_data, ai_result, pdf_bytes, pdf_filename)
         st.markdown(
             f"""
         <div class='result-card'>
-        <h4>🏆 Competitors</h4>
+        <h4>Competitors</h4>
         {comp_pills if comp_pills else '<span style="color:#888">No competitors found.</span>'}
         </div>
         """,
@@ -198,7 +198,7 @@ def render_report(company_name, search_data, ai_result, pdf_bytes, pdf_filename)
     st.markdown(
         f"""
     <div class='result-card'>
-    <h4>📝 Company Summary</h4>
+    <h4>Company Summary</h4>
     {ai_result.get('summary', 'N/A')}
     </div>
     """,
@@ -207,7 +207,7 @@ def render_report(company_name, search_data, ai_result, pdf_bytes, pdf_filename)
 
     st.markdown("#### Download Report")
     st.download_button(
-        label="⬇️ Download PDF Report",
+        label="Download PDF Report",
         data=pdf_bytes,
         file_name=pdf_filename,
         mime="application/pdf",
@@ -250,17 +250,17 @@ if user_input:
         status = st.empty()
 
         try:
-            status.markdown("**🔎 Searching for company info...**")
+            status.markdown("**Searching for company info...**")
             progress.progress(15)
             search_data = search_company(user_input)
             time.sleep(0.3)
 
-            status.markdown("**🌐 Crawling company website...**")
+            status.markdown("**Crawling company website...**")
             progress.progress(35)
             crawl_data = crawl_website(search_data["website"])
             time.sleep(0.3)
 
-            status.markdown("**📇 Extracting contact details...**")
+            status.markdown("**Extracting contact details...**")
             progress.progress(50)
             contact_info = extract_contact_info(crawl_data)
             if contact_info.get("phone") == "N/A" or contact_info.get("address") == "N/A":
@@ -274,14 +274,14 @@ if user_input:
             search_data["address"] = contact_info.get("address", "N/A")
             time.sleep(0.3)
 
-            status.markdown("**🤖 AI analyzing data...**")
+            status.markdown("**AI analyzing data...**")
             progress.progress(75)
             ai_result = analyze_company(
                 user_input, crawl_data, search_data, model_choice
             )
             time.sleep(0.3)
 
-            status.markdown("**📄 Generating PDF report...**")
+            status.markdown("**Generating PDF report...**")
             progress.progress(92)
             safe_name = user_input.replace(" ", "_").replace("/", "_")
             pdf_filename = f"{safe_name}_report.pdf"

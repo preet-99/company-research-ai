@@ -25,8 +25,6 @@ def extract_phone_from_text(text):
     for match in PHONE_PATTERN.finditer(text):
         candidate = match.group().strip()
         digits_only = re.sub(r'\D', '', candidate)
-        # Real phone numbers have at least 7 digits; skip short false positives
-        # like years, prices, or page numbers.
         if 7 <= len(digits_only) <= 15:
             return candidate
     return "N/A"

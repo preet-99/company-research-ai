@@ -13,7 +13,7 @@ def _extract_json_block(text):
     elif "```" in text:
         text = text.split("```", 1)[1].split("```", 1)[0]
 
-    # If there's extra chatter before/after, grab the outermost { ... }
+
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1 and end > start:
@@ -60,7 +60,7 @@ def _normalize_competitors(raw_list):
         elif isinstance(item, str):
             # Model just gave a plain string (e.g. "PayPal" or "PayPal - https://paypal.com")
             normalized.append({"name": item, "website": "N/A"})
-        # Anything else (int, None, etc.) is skipped
+   
 
     return normalized
 
@@ -192,7 +192,6 @@ Website Content: {scraped_data}
                 print(f"Done (valid JSON): {model}")
                 break
             else:
-                # This model responded but gave unparseable JSON — try the next one
                 print(f"Model {model} returned malformed JSON, trying next fallback...")
                 time.sleep(2)
                 continue
@@ -228,5 +227,5 @@ Website Content: {scraped_data}
         "products": [],
         "pain_points": [],
         "competitors": [],
-        "_raw_debug": last_raw_content,  # helpful while debugging; safe to ignore in UI
+        "_raw_debug": last_raw_content,  
     }
