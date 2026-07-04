@@ -26,7 +26,7 @@ An AI-powered web application that researches any company and generates a profes
 
 ### 1. Clone the repository
 
-git clone https://github.com/tera_username/company-research-ai
+git clone https://github.com/preet-99/company-research-ai.git
 cd company-research-ai
 
 ### 2. Install dependencies
