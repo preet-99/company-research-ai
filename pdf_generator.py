@@ -95,9 +95,13 @@ def generate_pdf(company_name, ai_data, search_data=None, filename="report.pdf")
 
         website = search_data.get('website', 'N/A')
         description = search_data.get('description', 'N/A')
+        phone = search_data.get('phone', 'N/A')
+        address = search_data.get('address', 'N/A')
 
         info_data = [
             ["Website", website],
+            ["Phone", phone],
+            ["Address", address],
             ["Overview", description],
         ]
 

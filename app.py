@@ -1,11 +1,15 @@
 import streamlit as st
 import time
-from search import search_company
-from crawler import crawl_website
+from search import search_company, search_contact_details
+from crawler import crawl_website, extract_contact_info
 from ai_processor import analyze_company
 from pdf_generator import generate_pdf
 
-# Sidebar 
+st.set_page_config(
+    page_title="AI Company Research Assistant", page_icon="🔍", layout="wide"
+)
+
+# Sidebar
 with st.sidebar:
     st.markdown("### ⚙️ Settings")
     model_choice = st.selectbox(
@@ -13,65 +17,87 @@ with st.sidebar:
         [
             "openrouter/free",
             "meta-llama/llama-3.3-70b:free",
+            "mistralai/mistral-7b-instruct:free",
+            "deepseek/deepseek-chat:free",
             "google/gemma-3-4b-it:free",
             "poolside/laguna-xs-2.1:free",
         ],
     )
-    st.info("Free models may be slow. openrouter/free is recommended.")
+    st.caption("Free models may be slower. If a response looks off, try a different model.")
 
-st.set_page_config(
-    page_title="AI Company Research Assistant", page_icon="🔍", layout="wide"
-)
-
-# CSS
+# CSS — consistent light theme throughout
 st.markdown(
     """
 <style>
-    .main { background-color: #f8f9fa; }
+    .main { background-color: #f7f7fb; }
+
     .stButton>button {
-        background-color: #1a237e;
+        background-color: #6C63FF;
         color: white;
-        border-radius: 8px;
-        padding: 10px 24px;
-        font-size: 16px;
+        border-radius: 10px;
+        padding: 10px 20px;
+        font-size: 15px;
+        font-weight: 500;
         border: none;
         width: 100%;
+        transition: background-color 0.15s ease;
     }
     .stButton>button:hover {
-        background-color: #283593;
+        background-color: #574fdb;
     }
-     .result-box {
-        background: #1e1e2e;
-        padding: 20px;
-        border-radius: 10px;
-        border-left: 4px solid #7c83fd;
-        margin: 10px 0;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-        color: #ffffff !important;
-    }
-    .result-box b {
-        color: #a5b4fc !important;
-    }
-    .result-box a {
-        color: #7c83fd !important;
-    }
-    .result-box ul li {
-        color: #ffffff !important;
-    }
-    .stButton>button {
-        background-color: #7c83fd;
-        color: white;
-        border-radius: 8px;
-        padding: 10px 24px;
-        font-size: 16px;
-        border: none;
-        width: 100%;
-    }
+
     .stDownloadButton>button {
-        background-color: #7c83fd !important;
+        background-color: #6C63FF !important;
         color: white !important;
-        border-radius: 8px !important;
+        border-radius: 10px !important;
         width: auto !important;
+        font-weight: 500 !important;
+    }
+
+    .result-card {
+        background: #ffffff;
+        padding: 18px 20px;
+        border-radius: 12px;
+        border: 1px solid #e6e6f0;
+        margin: 8px 0;
+        color: #1f1f2e;
+    }
+    .result-card h4 {
+        margin: 0 0 10px 0;
+        font-size: 14px;
+        color: #6C63FF;
+        font-weight: 600;
+    }
+    .result-card a { color: #6C63FF; }
+    .result-card ul { margin: 0; padding-left: 18px; }
+    .result-card li { margin-bottom: 4px; }
+
+    .comp-pill {
+        display: inline-block;
+        background: #f0eefe;
+        color: #4b3fd6;
+        border: 1px solid #d9d5fb;
+        border-radius: 20px;
+        padding: 6px 14px;
+        margin: 4px 6px 4px 0;
+        font-size: 13px;
+        text-decoration: none;
+    }
+
+    .example-chip button {
+        background-color: #f0eefe !important;
+        color: #4b3fd6 !important;
+        border: 1px solid #d9d5fb !important;
+        font-weight: 500 !important;
+    }
+    .example-chip button:hover {
+        background-color: #e2ddfc !important;
+    }
+
+    .report-divider {
+        border: none;
+        border-top: 1px dashed #d9d5fb;
+        margin: 18px 0;
     }
 </style>
 """,
@@ -79,174 +105,218 @@ st.markdown(
 )
 
 # Header
-st.markdown("## AI Company Research Assistant")
+st.markdown("## 🔍 AI Company Research Assistant")
 st.markdown(
     "Enter a company name or website URL to generate a full AI-powered research report."
 )
+
+# Example chips
+st.markdown("<div class='example-chip'>", unsafe_allow_html=True)
+chip_cols = st.columns([1, 1, 1, 5])
+example_pick = None
+with chip_cols[0]:
+    if st.button("Try Stripe", key="ex_stripe"):
+        example_pick = "Stripe"
+with chip_cols[1]:
+    if st.button("Try Notion", key="ex_notion"):
+        example_pick = "Notion"
+with chip_cols[2]:
+    if st.button("Try Figma", key="ex_figma"):
+        example_pick = "Figma"
+st.markdown("</div>", unsafe_allow_html=True)
+
 st.divider()
 
-# Chat history
+# Chat history — each entry is either a plain text turn, or a full report turn
 if "messages" not in st.session_state:
     st.session_state.messages = []
-if "last_result" not in st.session_state:
-    st.session_state.last_result = None
-if "last_search" not in st.session_state:
-    st.session_state.last_search = None
-if "last_company" not in st.session_state:
-    st.session_state.last_company = None
 
-# Display chat history
-for msg in st.session_state.messages:
+
+def render_report(company_name, search_data, ai_result, pdf_bytes, pdf_filename):
+    """Render the full result block for one company. Used both for the live
+    run and when redrawing past reports from chat history, so nothing gets
+    lost when a new company is researched afterwards."""
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown(
+            f"""
+        <div class='result-card'>
+        <h4>🏢 Company Info</h4>
+        <b>Website:</b> {search_data.get('website', 'N/A')}<br>
+        <b>Phone:</b> {search_data.get('phone', 'N/A')}<br>
+        <b>Address:</b> {search_data.get('address', 'N/A')}<br><br>
+        <b>Overview:</b><br>{search_data.get('description', 'N/A')}
+        </div>
+        """,
+            unsafe_allow_html=True,
+        )
+
+        products = ai_result.get("products", [])
+        product_html = "".join([f"<li>{p}</li>" for p in products])
+        st.markdown(
+            f"""
+        <div class='result-card'>
+        <h4>📦 Products / Services</h4>
+        <ul>{product_html}</ul>
+        </div>
+        """,
+            unsafe_allow_html=True,
+        )
+
+    with col2:
+        pain_html = "".join(
+            [f"<li>{p}</li>" for p in ai_result.get("pain_points", [])]
+        )
+        st.markdown(
+            f"""
+        <div class='result-card'>
+        <h4>⚠️ AI Pain Points</h4>
+        <ul>{pain_html}</ul>
+        </div>
+        """,
+            unsafe_allow_html=True,
+        )
+
+        comp_pills = "".join(
+            [
+                f"<a class='comp-pill' href='{c.get('website')}' target='_blank'>{c.get('name')}</a>"
+                for c in ai_result.get("competitors", [])
+            ]
+        )
+        st.markdown(
+            f"""
+        <div class='result-card'>
+        <h4>🏆 Competitors</h4>
+        {comp_pills if comp_pills else '<span style="color:#888">No competitors found.</span>'}
+        </div>
+        """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown(
+        f"""
+    <div class='result-card'>
+    <h4>📝 Company Summary</h4>
+    {ai_result.get('summary', 'N/A')}
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("#### Download Report")
+    st.download_button(
+        label="⬇️ Download PDF Report",
+        data=pdf_bytes,
+        file_name=pdf_filename,
+        mime="application/pdf",
+        key=f"pdf_{company_name}_{pdf_filename}",
+    )
+
+    with st.expander("View Sources"):
+        for source in search_data.get("sources", []):
+            st.markdown(f"- [{source}]({source})")
+
+
+# Replay every past turn so earlier reports stay visible
+for i, msg in enumerate(st.session_state.messages):
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
+        if msg.get("report"):
+            r = msg["report"]
+            render_report(
+                r["company_name"],
+                r["search_data"],
+                r["ai_result"],
+                r["pdf_bytes"],
+                r["pdf_filename"],
+            )
 
-# Input
-user_input = st.chat_input(
+# Input — either typed in chat, or picked from an example chip
+typed_input = st.chat_input(
     "Enter company name or URL (e.g. Stripe or https://stripe.com)"
 )
+user_input = typed_input or example_pick
 
 if user_input:
-    # Add user message
+    # Add + show the user's message immediately
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
     with st.chat_message("assistant"):
-
-        # Progress
         progress = st.progress(0)
         status = st.empty()
 
         try:
-            # Step 1: Search
-            status.markdown("**Searching for company info...**")
-            progress.progress(20)
+            status.markdown("**🔎 Searching for company info...**")
+            progress.progress(15)
             search_data = search_company(user_input)
-            time.sleep(0.5)
+            time.sleep(0.3)
 
-            # Step 2: Crawl
-            status.markdown("**Crawling company website...**")
-            progress.progress(40)
+            status.markdown("**🌐 Crawling company website...**")
+            progress.progress(35)
             crawl_data = crawl_website(search_data["website"])
-            time.sleep(0.5)
+            time.sleep(0.3)
 
-            # Step 3: AI
-            status.markdown("**AI analyzing data...**")
-            progress.progress(65)
+            status.markdown("**📇 Extracting contact details...**")
+            progress.progress(50)
+            contact_info = extract_contact_info(crawl_data)
+            if contact_info.get("phone") == "N/A" or contact_info.get("address") == "N/A":
+                fallback_contact = search_contact_details(user_input)
+                if contact_info.get("phone") == "N/A":
+                    contact_info["phone"] = fallback_contact.get("phone", "N/A")
+                if contact_info.get("address") == "N/A":
+                    contact_info["address"] = fallback_contact.get("address", "N/A")
+
+            search_data["phone"] = contact_info.get("phone", "N/A")
+            search_data["address"] = contact_info.get("address", "N/A")
+            time.sleep(0.3)
+
+            status.markdown("**🤖 AI analyzing data...**")
+            progress.progress(75)
             ai_result = analyze_company(
                 user_input, crawl_data, search_data, model_choice
             )
-            time.sleep(0.5)
+            time.sleep(0.3)
 
-            # Step 4: PDF
-            status.markdown("**Generating PDF report...**")
-            progress.progress(85)
+            status.markdown("**📄 Generating PDF report...**")
+            progress.progress(92)
             safe_name = user_input.replace(" ", "_").replace("/", "_")
-            pdf_path = f"{safe_name}_report.pdf"
-            generate_pdf(user_input, ai_result, search_data, pdf_path)
+            pdf_filename = f"{safe_name}_report.pdf"
+            generate_pdf(user_input, ai_result, search_data, pdf_filename)
+
+            # Read PDF bytes now so we can keep them in memory for history
+            # redisplay later — the file on disk isn't a reliable long-term
+            # source across reruns.
+            with open(pdf_filename, "rb") as f:
+                pdf_bytes = f.read()
+
             progress.progress(100)
             status.empty()
             progress.empty()
 
-            # Save results
-            st.session_state.last_result = ai_result
-            st.session_state.last_search = search_data
-            st.session_state.last_company = user_input
+            render_report(user_input, search_data, ai_result, pdf_bytes, pdf_filename)
 
-            # Show results
-            col1, col2 = st.columns(2)
-
-            with col1:
-                st.markdown("### Company Info")
-                st.markdown(
-                    f"""
-                <div class='result-box'>
-                <b>Website:</b> {search_data.get('website', 'N/A')}<br><br>
-                <b>Overview:</b><br>{search_data.get('description', 'N/A')}
-                </div>
-                """,
-                    unsafe_allow_html=True,
-                )
-
-                st.markdown("### Products / Services")
-                products = ai_result.get("products", [])
-                product_html = "".join([f"<li>{p}</li>" for p in products])
-                st.markdown(
-                    f"""
-                <div class='result-box'>
-                <ul style='margin:0;padding-left:20px'>{product_html}</ul>
-                </div>
-                """,
-                    unsafe_allow_html=True,
-                )
-
-            with col2:
-                st.markdown("### AI Pain Points")
-                pain_html = "".join(
-                    [
-                        f"<li style='margin-bottom:6px'>{p}</li>"
-                        for p in ai_result.get("pain_points", [])
-                    ]
-                )
-                st.markdown(
-                    f"""
-                <div class='result-box'>
-                <ul style='margin:0;padding-left:20px'>{pain_html}</ul>
-                </div>
-                """,
-                    unsafe_allow_html=True,
-                )
-
-                st.markdown("### Competitors")
-                for comp in ai_result.get("competitors", []):
-                    # Guard against malformed AI output (e.g. plain strings
-                    # instead of {"name":..., "website":...} dicts)
-                    if isinstance(comp, dict):
-                        comp_name = comp.get("name", "Unknown")
-                        comp_site = comp.get("website", "N/A")
-                    else:
-                        comp_name = str(comp)
-                        comp_site = "N/A"
-
-                    st.markdown(
-                        f"""
-                    <div class='result-box' style='padding:10px 16px;margin:6px 0'>
-                    <b>{comp_name}</b><br>
-                    <a href='{comp_site}' target='_blank'>{comp_site}</a>
-                    </div>
-                    """,
-                        unsafe_allow_html=True,
-                    )
-
-            # Summary
-            st.markdown("### Company Summary")
-            st.markdown(
-                f"""
-            <div class='result-box'>
-            {ai_result.get('summary', 'N/A')}
-            </div>
-            """,
-                unsafe_allow_html=True,
+            response_msg = (
+                f"Research complete for **{user_input}**! Report generated with "
+                f"summary, products, pain points, and "
+                f"{len(ai_result.get('competitors', []))} competitors found."
             )
 
-            # PDF Download
-            st.markdown("### Download Report")
-            with open(pdf_path, "rb") as f:
-                st.download_button(
-                    label="Download PDF Report",
-                    data=f,
-                    file_name=pdf_path,
-                    mime="application/pdf",
-                )
-
-            with st.expander("View Sources"):
-                for source in search_data.get("sources", []):
-                    st.markdown(f"- [{source}]({source})")
-
-            # Assistant message
-            response_msg = f"Research complete for **{user_input}**! Report generated with summary, products, pain points, and {len(ai_result.get('competitors', []))} competitors found."
             st.session_state.messages.append(
-                {"role": "assistant", "content": response_msg}
+                {
+                    "role": "assistant",
+                    "content": response_msg,
+                    "report": {
+                        "company_name": user_input,
+                        "search_data": search_data,
+                        "ai_result": ai_result,
+                        "pdf_bytes": pdf_bytes,
+                        "pdf_filename": pdf_filename,
+                    },
+                }
             )
 
         except Exception as e:
@@ -257,5 +327,6 @@ if user_input:
                 {
                     "role": "assistant",
                     "content": f"Error processing request: {str(e)}",
+                    "report": None,
                 }
             )

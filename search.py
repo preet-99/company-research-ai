@@ -1,5 +1,6 @@
 import requests
 import streamlit as st
+from contact_utils import extract_phone_from_text, extract_address_from_text
 
 
 def search_company(query):
@@ -50,6 +51,42 @@ def search_company(query):
     except Exception as e:
         print(e)
         return {"website": query, "description": "", "snippets": [], "sources": []}
+
+
+def search_contact_details(company_name):
+    """
+    Fallback lookup for phone number / address via Serper, used when the
+    website crawler couldn't find this info on the contact page directly.
+
+    Args:
+        company_name (str): Name (or URL) of the company being researched.
+
+    Returns:
+        dict: {"phone": str, "address": str}, "N/A" when nothing is found.
+    """
+    try:
+        response = requests.post(
+            "https://google.serper.dev/search",
+            headers={"X-API-KEY": st.secrets["SERPER_API_KEY"]},
+            json={"q": f"{company_name} phone number address headquarters contact"},
+        )
+        data = response.json()
+        organic = data.get("organic", [])
+        knowledge_graph = data.get("knowledgeGraph", {})
+
+        # Knowledge graph sometimes has structured contact info directly
+        kg_phone = knowledge_graph.get("phone") or knowledge_graph.get("phoneNumber")
+        kg_address = knowledge_graph.get("address")
+
+        combined_snippets = " ".join(r.get("snippet", "") for r in organic[:5])
+
+        phone = kg_phone or extract_phone_from_text(combined_snippets)
+        address = kg_address or extract_address_from_text(combined_snippets)
+
+        return {"phone": phone or "N/A", "address": address or "N/A"}
+    except Exception as e:
+        print(e)
+        return {"phone": "N/A", "address": "N/A"}
 
 
 def search_competitors(company_name, industry=""):
