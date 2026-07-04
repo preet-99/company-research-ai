@@ -65,6 +65,7 @@ company-research-ai/
 │   └── secrets.toml
 ├── .gitignore
 ├── app.py
+├── contact_utils.py
 ├── search.py
 ├── crawler.py
 ├── ai_processor.py
