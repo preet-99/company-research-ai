@@ -1,9 +1,23 @@
 import requests
 import streamlit as st
 
+
 def search_company(query):
+    """
+     Search for a company by its name or website URL and return relevant company information.
+
+    Args:
+        query (str): Company name or website URL.
+
+    Returns:
+        dict: Company information obtained from the search.
+    """
     try:
-        if query.startswith("http://") or query.startswith("https://") or query.startswith("www."):
+        if (
+            query.startswith("http://")
+            or query.startswith("https://")
+            or query.startswith("www.")
+        ):
             search_query = f"company info site:{query}"
         else:
             search_query = f"{query} company info official website"
@@ -19,7 +33,7 @@ def search_company(query):
         faqs = data.get("peopleAlsoAsk", [])
 
         if query.startswith("http") or query.startswith("www."):
-            website = query  
+            website = query
         else:
             website = organic[0]["link"] if organic else ""
 
@@ -35,15 +49,20 @@ def search_company(query):
         return company_info
     except Exception as e:
         print(e)
-        return {
-            "website": query,
-            "description": "",
-            "snippets": [],
-            "sources": []
-        }
+        return {"website": query, "description": "", "snippets": [], "sources": []}
 
 
 def search_competitors(company_name, industry=""):
+    """
+      Search for competitors of a given company.
+
+    Args:
+        company_name (str): Name of the company.
+        industry (str): Industry of the company (optional).
+
+    Returns:
+        list: A list of competitor companies.
+    """
     try:
         response = requests.post(
             "https://google.serper.dev/search",
@@ -55,11 +74,13 @@ def search_competitors(company_name, industry=""):
 
         competitors = []
         for item in organic[:5]:
-            competitors.append({
-                "name": item["title"],
-                "website": item["link"],
-                "snippet": item["snippet"],
-            })
+            competitors.append(
+                {
+                    "name": item["title"],
+                    "website": item["link"],
+                    "snippet": item["snippet"],
+                }
+            )
 
         return competitors
     except Exception as e:
